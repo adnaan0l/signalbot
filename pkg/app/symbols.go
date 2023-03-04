@@ -9,7 +9,7 @@ import (
 	"os"
 )
 
-func UpdateSymbolList() int16 {
+func UpdateSymbolList() uint8 {
 	var symbolList []string
 
 	_, resBody := utils.GetData(config.ExchangeInfo.String())
