@@ -5,9 +5,10 @@ import (
 	"adnan/binance-bot/pkg/utils"
 	"encoding/json"
 	"fmt"
+	"strconv"
 )
 
-func GetTickerData() uint8 {
+func GetTickerData(limit int) uint8 {
 	ctx, rdb := utils.GetRedisClient()
 	res, err := rdb.HGet(ctx, "binance", "symbols").Result()
 	if err != nil {
@@ -19,12 +20,10 @@ func GetTickerData() uint8 {
 
 	pipeline := rdb.Pipeline()
 	for _, symbol := range symbolList[:2] {
-		fmt.Println(symbol)
-		limit := "10"
 		interval := "1h"
 		endpointUrl := fmt.Sprintf(
 			"%s?interval=%s&limit=%s&symbol=%s",
-			config.CandleStick.String(), interval, limit, symbol,
+			config.CandleStick.String(), interval, strconv.Itoa(limit), symbol,
 		)
 		_, body := utils.GetData(endpointUrl)
 		pipeline.HSet(ctx, symbol, "ticker", string(body))
