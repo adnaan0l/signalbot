@@ -1,73 +1,86 @@
 package app
 
 import (
-	"adnan/binance-bot/pkg/utils"
-	"encoding/json"
 	"fmt"
-	"time"
 
-	"github.com/sdcoffey/big"
 	"github.com/sdcoffey/techan"
 )
 
-func GetTimeSeries(symbol string) *techan.TimeSeries {
+func getBolBands(series *techan.TimeSeries) (techan.Indicator, techan.Indicator, error) {
+	/*
+		Calculates the Bollinger Bands indicator for a given time series.
+		The upper band and lower band indicators are returned.
 
-	ctx, rdb := utils.GetRedisClient()
+		Parameters:
+		- series: a pointer to a techan.TimeSeries object for which to calculate the Bollinger Bands.
 
-	series := techan.NewTimeSeries()
-
-	result, err := rdb.HGet(ctx, symbol, "ticker").Result()
-	if err != nil {
-		fmt.Printf("error while doing HGET command in gredis : %v", err)
+		Returns:
+		- A techan.Indicator representing the upper band of the Bollinger Bands.
+		- A techan.Indicator representing the lower band of the Bollinger Bands.
+	*/
+	if series == nil || series == techan.NewTimeSeries() {
+		return nil, nil, fmt.Errorf("input series is nil or empty")
 	}
 
-	var ticker [][]interface{}
-	json.Unmarshal([]byte(result), &ticker)
-
-	for idx := range ticker {
-		start := ticker[idx][0].(float64)
-		period := techan.NewTimePeriod(time.Unix(int64(start)/1000, 0), time.Second*3599)
-
-		candle := techan.NewCandle(period)
-		candle.OpenPrice = big.NewFromString(ticker[idx][1].(string))
-		candle.MaxPrice = big.NewFromString(ticker[idx][2].(string))
-		candle.MinPrice = big.NewFromString(ticker[idx][3].(string))
-		candle.ClosePrice = big.NewFromString(ticker[idx][4].(string))
-		candle.Volume = big.NewFromString(ticker[idx][5].(string))
-
-		series.AddCandle(candle)
-	}
-
-	return series
-}
-
-func getBolBands(series *techan.TimeSeries) (techan.Indicator, techan.Indicator) {
+	// Get the Closing price for the series
 	closePrices := techan.NewClosePriceIndicator(series)
+
+	// Generate the Upper Bollinger Band
 	bolHigh := techan.NewBollingerUpperBandIndicator(closePrices, 21, 2.0)
+
+	// Generate the Lower Bollinger Band
 	bolLow := techan.NewBollingerLowerBandIndicator(closePrices, 21, 2.0)
 
-	return bolHigh, bolLow
+	return bolHigh, bolLow, nil
 }
 
-func Strategy1(series *techan.TimeSeries) techan.RuleStrategy {
+func Strategy1(series *techan.TimeSeries) (techan.RuleStrategy, error) {
+	/*
+		Returns a RuleStrategy that uses Bollinger Bands and cross
+		indicator rules to generate buy and sell signals.
 
+		Parameters:
+		- series: A pointer to a TimeSeries containing the data to be analyzed.
+
+		Returns:
+		- A RuleStrategy struct containing the entry and exit rules for the strategy.
+		- An error if there was an issue generating the strategy.
+	*/
+	if series == nil || len(series.Candles) == 0 {
+		return techan.RuleStrategy{}, fmt.Errorf("empty or nil time series")
+	}
+
+	// Get the Maximun Price within the series
 	highPrices := techan.NewHighPriceIndicator(series)
+
+	// Get the Minimum Price within the series
 	lowPrices := techan.NewLowPriceIndicator(series)
 
-	bolHigh, bolLow := getBolBands(series)
+	// Get the Upper and Lower Bollinger Bands
+	bolHigh, bolLow, err := getBolBands(series)
+	if err != nil {
+		return techan.RuleStrategy{}, fmt.Errorf("failed to get Bollinger Bands %v\n", err)
+	}
 
+	// Create the entry rule where a trade is entered
+	// If the Minimum Price goes below the Lower Bollinger Band
 	entryRule := techan.And(
 		techan.NewCrossDownIndicatorRule(lowPrices, bolLow),
-		techan.PositionNewRule{})
+		techan.PositionNewRule{},
+	)
 
+	// Create the exit rule where a trade is exited
+	// If the Maximum Price goes above the Upper Bollinger Band
 	exitRule := techan.And(
 		techan.NewCrossUpIndicatorRule(highPrices, bolHigh),
-		techan.PositionNewRule{})
+		techan.PositionNewRule{},
+	)
 
+	// Create the strategy with the above entry and exit rules
 	strategy := techan.RuleStrategy{
 		UnstablePeriod: 0,
 		EntryRule:      entryRule,
 		ExitRule:       exitRule,
 	}
-	return strategy
+	return strategy, nil
 }

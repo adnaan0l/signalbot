@@ -21,6 +21,11 @@ const (
 )
 
 func (c Category) String() string {
+	/*
+		Returns the corresponding Binance API endpoint URL for the category.
+		If the category is unknown, it returns "unknown".
+		String returns the string representation of the given category.
+	*/
 	switch c {
 	case Status:
 		return "/api/v3/ping"
@@ -37,6 +42,11 @@ func (c Category) String() string {
 }
 
 func (u Url) String() string {
+	/*
+		Returns the corresponding Binance URL.
+		If the category is unknown, it returns "unknown".
+		String returns the string representation of the given category.
+	*/
 	switch u {
 	case DataUrl:
 		return "https://data.binance.com"

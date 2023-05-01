@@ -1,15 +1,50 @@
 package utils
 
 import (
+	"adnan/binance-bot/pkg/config"
+	"adnan/binance-bot/pkg/models"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-func ChunkSlice(slice []string, chunkSize int) [][]string {
+func ChunkSlice(slice []string, chunkSize int) ([][]string, error) {
+	/*
+		ChunkSlice divides the input slice into chunks of the given chunk size
+		returns a 2D slice of strings, where each element of the slice
+		a chunk of the input slice. If the input slice is nil or the chunk
+		size is less than 1, an error is returned.
+
+		Parameters:
+		- slice: the input slice to be chunked
+		- chunkSize: the size of each chunk
+
+		Returns:
+		- [][]string: the chunked slices
+		- error: an error if the input slice is nil or the chunk size is invalid
+
+		Example usage:
+			slice := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"}
+			chunks, err := ChunkSlice(slice, 3)
+			if err != nil {
+			log.Fatal(err)
+			}
+			fmt.Println(chunks) // Output: [[a b c] [d e f] [g h i]]
+	*/
+	if slice == nil {
+		return nil, fmt.Errorf("input slice is nil")
+	}
+	if chunkSize < 1 {
+		return nil, fmt.Errorf("invalid chunk size")
+	}
+
 	var chunks [][]string
 	for i := 0; i < len(slice); i += chunkSize {
 		end := i + chunkSize
@@ -18,31 +53,119 @@ func ChunkSlice(slice []string, chunkSize int) [][]string {
 		}
 		chunks = append(chunks, slice[i:end])
 	}
-	return chunks
+	return chunks, nil
 }
 
-func GetData(endpointURL string) (int, []byte) {
-	baseURL := "https://data.binance.com"
-	url := baseURL + endpointURL
+func GetData(endpointURL string) ([]byte, error) {
+	/*
+		GetData sends an HTTP GET request to the specified URL
+		and returns the response body and status code.
+		An error is returned if the request fails or if the
+		response cannot be read.
+
+		url: The URL to send the GET request to.
+
+		Returns:
+		    - int: The HTTP status code of the response.
+		    - []byte: The response body as a byte slice.
+		    - error: If an error occurred while sending
+					 the request or reading the response.
+	*/
+
+	//
+	url := config.DataUrl.String() + endpointURL
 	res, err := http.Get(url)
 	if err != nil {
-		fmt.Printf("error making http request: %s\n", err)
+		return nil, fmt.Errorf("http GET request failed: %s\n", err)
 	}
+	defer res.Body.Close()
 
 	resBody, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		fmt.Printf("client: could not read response body: %s\n", err)
+		return nil, fmt.Errorf("failed to read response body: %s\n", err)
 	}
-	return res.StatusCode, resBody
+	return resBody, nil
 }
 
-func GetRedisClient() (context.Context, *redis.Client) {
+func GetContextWithTimeout(interval int) (context.Context, context.CancelFunc) {
+	// Used to carry the deadline value for the Redis
 	ctx := context.Background()
 
+	// Use the context to manage a timeout for the Redis operation
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(interval)*time.Second)
+	return ctx, cancel
+}
+
+// TODO Add TLS config
+func GetRedisClient() (*redis.Client, error) {
+	/*
+		Creates a new Redis client with preferred settings and
+		returns a context, Redis client instance, and an error.
+
+		Parameters: None.
+
+		Return Values
+		context.Context: A context.Context instance that can be
+				used to manage a timeout for the Redis operation.
+		*redis.Client: A pointer to a Redis client instance.
+		error: An error value that is non-nil if there was
+			   an issue with creating the Redis client.
+	*/
+	r_url := os.Getenv("REDIS_URL")
+	if r_url == "" {
+		r_url = "localhost:6379"
+	}
+	r_creds := os.Getenv("REDIS_CREDS")
+	if r_creds == "" {
+		r_creds = ":"
+	}
+	creds := strings.Split(r_creds, ":")
+
+	// Create a new Redis client with preferred settings
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "", // no password set
-		DB:       0,  // use default DB
+		Addr:     r_url,
+		Username: creds[0],
+		Password: creds[1],
+		DB:       0, // use default DB
 	})
-	return ctx, rdb
+
+	ctx, cancel := GetContextWithTimeout(10)
+
+	// Test with a ping before returning client
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		return nil, err
+	}
+	defer cancel()
+
+	return rdb, nil
+}
+
+func GetSymbolList() ([]string, error) {
+	/*
+		Returns a list of trading symbols relevant to the 'USDT' quote asset.
+
+		Returns:
+		- []string: List of trading symbols relevant to the 'USDT' quote asset.
+		- error: An error, if any occurred.
+	*/
+	var symbolList []string
+
+	resBody, err := GetData(config.ExchangeInfo.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get exchange info: %s\n", err)
+	}
+
+	var parsed models.ExchangeInfoResponse
+	if err := json.Unmarshal(resBody, &parsed); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %s", err)
+	}
+
+	// Get all symbols with the USDT quote asset
+	for _, symbol := range parsed.Symbols {
+		if symbol.QuoteAsset == "USDT" {
+			symbolList = append(symbolList, symbol.Symbol)
+		}
+	}
+
+	return symbolList, nil
 }
