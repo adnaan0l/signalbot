@@ -6,8 +6,10 @@ import (
 	"adnan/binance-bot/pkg/utils"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/sdcoffey/big"
@@ -66,13 +68,15 @@ func LoadTickerData(symbolList []string, limit int) error {
 	}
 
 	ctx, cancel := utils.GetContextWithTimeout(10)
-	pipeline := rdb.Pipeline()
+	defer cancel()
+	// pipeline := rdb.Pipeline()
 
+	var wg sync.WaitGroup
 	errChan := make(chan error, len(symbolList))
-	doneChan := make(chan bool, len(symbolList))
 
 	// TODO Remove filter on symbol list
 	for _, symbol := range symbolList[:5] {
+		log.Printf("Loading data for %s", symbol)
 		go func(symbol string) {
 			interval := "1h"
 			endpointUrl := fmt.Sprintf(
@@ -82,19 +86,23 @@ func LoadTickerData(symbolList []string, limit int) error {
 			body, err := utils.GetData(client, endpointUrl)
 			if err != nil {
 				errChan <- fmt.Errorf("failed to get data for symbol %s: %v", symbol, err)
-			} else {
-				pipeline.HSet(ctx, symbol, "ticker", string(body))
+				return
 			}
-			doneChan <- true
+			if err := rdb.HSet(ctx, symbol, "ticker", string(body)).Err(); err != nil {
+				errChan <- fmt.Errorf("failed to store data for symbol %s in Redis: %v", symbol, err)
+			}
 		}(symbol)
 	}
+	go func() {
+		wg.Wait()
+		close(errChan)
+	}()
 
-	// TODO Add better error logging for operations in goroutines
-	_, err = pipeline.Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("error executing pipeline: %v", err)
+	for err := range errChan {
+		if err != nil {
+			return err
+		}
 	}
-	defer cancel()
 	return nil
 }
 
@@ -109,10 +117,13 @@ func GetTimeSeries(symbol string) (*techan.TimeSeries, error) {
 	*/
 
 	ctx, cancel := utils.GetContextWithTimeout(10)
+	defer cancel()
+
 	rdb, err := utils.GetRedisClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Redis client %v\n", err)
 	}
+	defer rdb.Close()
 
 	series := techan.NewTimeSeries()
 
@@ -120,7 +131,6 @@ func GetTimeSeries(symbol string) (*techan.TimeSeries, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error while doing HGET command in gredis : %v", err)
 	}
-	defer cancel()
 
 	var ticker [][]interface{}
 	if err := json.Unmarshal([]byte(result), &ticker); err != nil {

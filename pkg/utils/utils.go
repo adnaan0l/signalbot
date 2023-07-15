@@ -118,14 +118,14 @@ func GetRedisClient() (*redis.Client, error) {
 	*/
 	r_url := os.Getenv("REDIS_URL")
 	if r_url == "" {
-		r_url = "localhost:6379"
+		r_url = "127.0.0.1:6379"
 	}
 	r_creds := os.Getenv("REDIS_CREDS")
 	if r_creds == "" {
 		r_creds = ":"
 	}
 	creds := strings.Split(r_creds, ":")
-
+	fmt.Println(creds[0], creds[1])
 	// Create a new Redis client with preferred settings
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     r_url,
@@ -138,9 +138,9 @@ func GetRedisClient() (*redis.Client, error) {
 
 	// Test with a ping before returning client
 	if err := rdb.Ping(ctx).Err(); err != nil {
+		cancel()
 		return nil, err
 	}
-	defer cancel()
 
 	return rdb, nil
 }
