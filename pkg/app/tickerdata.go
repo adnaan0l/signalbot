@@ -2,9 +2,11 @@ package app
 
 import (
 	"adnan/binance-bot/pkg/config"
+	"adnan/binance-bot/pkg/models"
 	"adnan/binance-bot/pkg/utils"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -12,7 +14,38 @@ import (
 	"github.com/sdcoffey/techan"
 )
 
-func LoadTickerData(limit int) error {
+func GetSymbolList() ([]string, error) {
+	/*
+		Returns a list of trading symbols relevant to the 'USDT' quote asset.
+
+		Returns:
+		- []string: List of trading symbols relevant to the 'USDT' quote asset.
+		- error: An error, if any occurred.
+	*/
+	var symbolList []string
+	var client utils.HTTPClient = &http.Client{}
+
+	resBody, err := utils.GetData(client, config.ExchangeInfo.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get exchange info: %s\n", err)
+	}
+
+	var parsed models.ExchangeInfoResponse
+	if err := json.Unmarshal(resBody, &parsed); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %s", err)
+	}
+
+	// Get all symbols with the USDT quote asset
+	for _, symbol := range parsed.Symbols {
+		if symbol.QuoteAsset == "USDT" {
+			symbolList = append(symbolList, symbol.Symbol)
+		}
+	}
+
+	return symbolList, nil
+}
+
+func LoadTickerData(symbolList []string, limit int) error {
 	/*
 		LoadTickerData loads ticker data for each symbol in symbolList
 		and stores it in Redis.
@@ -25,10 +58,7 @@ func LoadTickerData(limit int) error {
 		Returns:
 		- error: An error if there was a problem getting the symbol list or storing data in Redis.
 	*/
-	symbolList, err := utils.GetSymbolList()
-	if err != nil {
-		return fmt.Errorf("failed to get symbol list: %v\n", err)
-	}
+	var client utils.HTTPClient = &http.Client{}
 
 	rdb, err := utils.GetRedisClient()
 	if err != nil {
@@ -42,14 +72,14 @@ func LoadTickerData(limit int) error {
 	doneChan := make(chan bool, len(symbolList))
 
 	// TODO Remove filter on symbol list
-	for _, symbol := range symbolList[:2] {
+	for _, symbol := range symbolList[:5] {
 		go func(symbol string) {
 			interval := "1h"
 			endpointUrl := fmt.Sprintf(
 				"%s?interval=%s&limit=%s&symbol=%s",
 				config.CandleStick.String(), interval, strconv.Itoa(limit), symbol,
 			)
-			body, err := utils.GetData(endpointUrl)
+			body, err := utils.GetData(client, endpointUrl)
 			if err != nil {
 				errChan <- fmt.Errorf("failed to get data for symbol %s: %v", symbol, err)
 			} else {
@@ -60,7 +90,6 @@ func LoadTickerData(limit int) error {
 	}
 
 	// TODO Add better error logging for operations in goroutines
-
 	_, err = pipeline.Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("error executing pipeline: %v", err)
