@@ -2,9 +2,7 @@ package utils
 
 import (
 	"adnan/binance-bot/pkg/config"
-	"adnan/binance-bot/pkg/models"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -14,6 +12,11 @@ import (
 
 	"github.com/redis/go-redis/v9"
 )
+
+// HTTPClient interface
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
 
 func ChunkSlice(slice []string, chunkSize int) ([][]string, error) {
 	/*
@@ -56,7 +59,7 @@ func ChunkSlice(slice []string, chunkSize int) ([][]string, error) {
 	return chunks, nil
 }
 
-func GetData(endpointURL string) ([]byte, error) {
+func GetData(client HTTPClient, endpointURL string) ([]byte, error) {
 	/*
 		GetData sends an HTTP GET request to the specified URL
 		and returns the response body and status code.
@@ -71,10 +74,12 @@ func GetData(endpointURL string) ([]byte, error) {
 		    - error: If an error occurred while sending
 					 the request or reading the response.
 	*/
-
-	//
 	url := config.DataUrl.String() + endpointURL
-	res, err := http.Get(url)
+	request, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GET request: %s\n", err)
+	}
+	res, err := client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("http GET request failed: %s\n", err)
 	}
@@ -138,34 +143,4 @@ func GetRedisClient() (*redis.Client, error) {
 	defer cancel()
 
 	return rdb, nil
-}
-
-func GetSymbolList() ([]string, error) {
-	/*
-		Returns a list of trading symbols relevant to the 'USDT' quote asset.
-
-		Returns:
-		- []string: List of trading symbols relevant to the 'USDT' quote asset.
-		- error: An error, if any occurred.
-	*/
-	var symbolList []string
-
-	resBody, err := GetData(config.ExchangeInfo.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get exchange info: %s\n", err)
-	}
-
-	var parsed models.ExchangeInfoResponse
-	if err := json.Unmarshal(resBody, &parsed); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %s", err)
-	}
-
-	// Get all symbols with the USDT quote asset
-	for _, symbol := range parsed.Symbols {
-		if symbol.QuoteAsset == "USDT" {
-			symbolList = append(symbolList, symbol.Symbol)
-		}
-	}
-
-	return symbolList, nil
 }
