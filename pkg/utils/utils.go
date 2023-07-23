@@ -118,7 +118,7 @@ func GetRedisClient() (*redis.Client, error) {
 	*/
 	r_url := os.Getenv("REDIS_URL")
 	if r_url == "" {
-		r_url = "127.0.0.1:6379"
+		r_url = "localhost:6379"
 	}
 	r_creds := os.Getenv("REDIS_CREDS")
 	if r_creds == "" {

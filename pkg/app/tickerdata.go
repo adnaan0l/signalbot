@@ -6,7 +6,6 @@ import (
 	"adnan/binance-bot/pkg/utils"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -74,10 +73,11 @@ func LoadTickerData(symbolList []string, limit int) error {
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(symbolList))
 
-	// TODO Remove filter on symbol list
-	for _, symbol := range symbolList[:5] {
-		log.Printf("Loading data for %s", symbol)
+	for _, symbol := range symbolList {
+		wg.Add((1))
 		go func(symbol string) {
+			defer wg.Done()
+
 			interval := "1h"
 			endpointUrl := fmt.Sprintf(
 				"%s?interval=%s&limit=%s&symbol=%s",
@@ -93,6 +93,7 @@ func LoadTickerData(symbolList []string, limit int) error {
 			}
 		}(symbol)
 	}
+
 	go func() {
 		wg.Wait()
 		close(errChan)

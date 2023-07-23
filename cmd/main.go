@@ -2,6 +2,7 @@ package main
 
 import (
 	"adnan/binance-bot/pkg/app"
+	"fmt"
 	"log"
 
 	"github.com/sdcoffey/techan"
@@ -18,15 +19,14 @@ func main() {
 
 	log.Println("Getting Symbol List")
 	symbolList, err := app.GetSymbolList()
+	fmt.Println(symbolList)
 	if err != nil {
 		log.Fatalf("failed to get symbol list: %v\n", err)
 	}
-	log.Println("Loading Ticker Data")
 	if err := app.LoadTickerData(symbolList, limit); err != nil {
 		log.Fatalf("failed to load ticker data: %v", err)
 	}
 	for _, symbol := range symbolList[:5] {
-		log.Printf("Checking %s", symbol)
 		series, err := app.GetTimeSeries(symbol)
 		if err != nil {
 			log.Fatalf("failed to get time series for %s: %v", symbol, err)
@@ -40,13 +40,12 @@ func main() {
 		record := techan.NewTradingRecord()
 		for i := 20; i < limit; i++ {
 			if strategy.ShouldEnter(i, record) {
-				log.Printf("Buy at %s", series.Candles[i].MinPrice)
+				log.Printf("Buy %s at %s", symbol, series.Candles[i].MinPrice)
 				break
 			} else if strategy.ShouldExit(i, record) {
 				log.Printf("Sell at %s", series.Candles[i].MaxPrice)
 				break
 			}
 		}
-		log.Println("Do Nothing")
 	}
 }
