@@ -50,11 +50,10 @@ func Strategy1(series *techan.TimeSeries) (techan.RuleStrategy, error) {
 		return techan.RuleStrategy{}, fmt.Errorf("empty or nil time series")
 	}
 
-	// Get the Maximun Price within the series
+	// Get the High, Low, and Close prices from the series
 	highPrices := techan.NewHighPriceIndicator(series)
-
-	// Get the Minimum Price within the series
 	lowPrices := techan.NewLowPriceIndicator(series)
+	closePrices := techan.NewClosePriceIndicator(series)
 
 	// Get the Upper and Lower Bollinger Bands
 	bolHigh, bolLow, err := getBolBands(series)
@@ -62,18 +61,27 @@ func Strategy1(series *techan.TimeSeries) (techan.RuleStrategy, error) {
 		return techan.RuleStrategy{}, fmt.Errorf("failed to get Bollinger Bands %v\n", err)
 	}
 
-	// Create the entry rule where a trade is entered
-	// If the Minimum Price goes below the Lower Bollinger Band
+	// Calculate the RSI indicator
+	rsi := techan.NewRelativeStrengthIndexIndicator(closePrices, 14)
+	rsiOversold := techan.NewConstantIndicator(30)
+	rsiUndersold := techan.NewConstantIndicator(70)
+
+	// Create the entry rule with Bollinger Bands and RSI filter conditions
 	entryRule := techan.And(
-		techan.NewCrossDownIndicatorRule(lowPrices, bolLow),
-		techan.PositionNewRule{},
+		techan.And(
+			techan.NewCrossDownIndicatorRule(lowPrices, bolLow), // Price below lower Bollinger Band
+			techan.NewCrossUpIndicatorRule(rsi, rsiOversold),    // RSI crosses above 30 (oversold condition)
+		),
+		techan.PositionNewRule{}, // No existing position
 	)
 
-	// Create the exit rule where a trade is exited
-	// If the Maximum Price goes above the Upper Bollinger Band
+	// Create the exit rule with Bollinger Bands and RSI filter conditions
 	exitRule := techan.And(
-		techan.NewCrossUpIndicatorRule(highPrices, bolHigh),
-		techan.PositionNewRule{},
+		techan.And(
+			techan.NewCrossUpIndicatorRule(highPrices, bolHigh), // Price above upper Bollinger Band
+			techan.NewCrossDownIndicatorRule(rsi, rsiUndersold), // RSI crosses below 70 (overbought condition)
+		),
+		techan.PositionOpenRule{}, // Existing position open
 	)
 
 	// Create the strategy with the above entry and exit rules
